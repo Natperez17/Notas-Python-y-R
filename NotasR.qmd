@@ -1,0 +1,436 @@
+---
+project:
+  type: book
+
+book:
+  title: "Notas R"
+  chapters:
+    - index.qmd
+    - variables-indicadoras-o-dummies.qmd
+    # otros capítulos...
+format:
+  html:
+    theme: cosmo
+    toc: true
+    number-sections: true
+    code-fold: true
+    search: true
+---
+
+# Introducción
+
+Estas notas fueron realizadas con la finalidad de ser un recurso fundamental para el análisis de datos. Una guía que permita agilizar y tomar decisiones rápidas en cuanto a los procedimientos ideales para el procesamiento, análisis, inferencia y viasualización de datos en R.
+
+Nota: Todos los recursos empleados en este documento son extraídos de notas de clases, páginas web y propios. 
+
+
+# Análisis Exploratorio y Descriptivos
+
+Uno de los pasos más importantes al realizar un análisis de datos, es explorar y describir los datos con los que se cuentan. En esta sección se revisará temas como: Datos faltantes, reemplazar valores, visualización de datos e incluso prubas no parámetricas.
+
+## Datos de clientes
+
+La base de datos data_clientes contiene información de los clientes de una Cooperativa, se cuentan con 4117 registro y 11 columnas con variables que incluyen un identificador único, así como características sociodemográficas como la edad, el género y el estado civil. También recoge variables económicas como los ingresos anuales, el número de hijos, el número de tarjetas, la modalidad de pago, la tenencia de hipoteca y el número de préstamos activos. Finalmente, incluye la variable RIESGO, que clasifica a los clientes según su perfil crediticio, y puede ser utilizada como variable objetivo en modelos de predicción o segmentación.
+
+
+```{r}
+# Cargar librerías e instalar las que no estén instaladas
+pacman::p_load(tidyverse, janitor)
+```
+
+```{r}
+# Cargar base de datos
+data_clientes <- read.table("C:/Users/natal/Escritorio/Semestres/Semestre 10/Mineria/Data Clientes Cooperativa.txt", 
+                            sep= "\t", na= c("NA", "", " "), header=T)
+
+# Revisar los primeros 6 registros de la base de datos
+head(data_clientes)
+
+# Estructura de la base de datos 
+glimpse(data_clientes)
+
+# Estadísticas descriptivas de las variables de la base de datos
+summary(data_clientes)
+
+length(unique(data_clientes$ID))  #Devuelve el número de valores únicos en la variable ID
+
+```
+## Descripción de datos
+
+### Descripción de datos cuantitativos
+
+Este código permite obtener información detallada de las estadísticas descriptivas para las variables numéricas, como el n, desviación estándar, IQR, etc. Esta información es mucho más completa que el summary().
+
+```{r}
+variables.Num <- c("EDAD", "INGRESOS", "NUM_HIJOS", "NUM_TARJETAS", "PRESTAMOS")
+
+# Tabla: Análisis descriptivo variables númericas
+
+tabla_descrip.dt_clientes <- sapply(variables.Num, function(var){
+  x=data_clientes[[var]]
+  c(n= length(x),
+    media= round(mean(x, na.rm=T),2),
+    Desv.Est= round(sd(x, na.rm=T),2),
+    mediana= round(median(x, na.rm=T),2),
+    IQR= round(IQR(x, na.rm=T),2),
+    Percentil1= round(quantile(x, prob=0.25, na.rm=T),2),
+    Percentil2= round(quantile(x, prob=0.75, na.rm=T),2),
+    Percentil3= round(quantile(x, prob=0.95, na.rm=T),2))
+})
+
+tabla_descrip.dt_clientes
+```
+
+### Descripción de datos cualitativos
+
+Este código genera las frecuencias absolutas y relativas para todas las variables cualitativas a tráves de tabyl() y lapply(), este último comando se utiliza para aplicar una función a cada elemento de una lista o vector, devolviendo siempre el resultado como una lista.
+
+```{r}
+variables.Cat <- c("GENERO", "ESTADO_CIVIL", "MODALIDAD_PAGO", "HIPOTECA", "RIESGO")
+Frec_tablas.Cat <- lapply(variables.Cat, function(var) tabyl(data_clientes[[var]]))
+names(Frec_tablas.Cat) <- variables.Cat
+Frec_tablas.Cat
+
+```
+
+## Datos faltantes
+
+La figura @fig-MissData es muy útil para visualizar los datos faltantes por variable. En este caso hay muy pocos por lo que no se logran ver.
+```{r}
+library(visdat)
+#| label: fig-MissData
+#| fig-cap: "Datos faltantes con vis_miss"
+#| code-fold: true
+vis_miss(data_clientes) 
+
+```
+
+Por otro lado, dado que la idea es identificar cuáles son las variables que contienen NA's se utiliza sapply() en vez de lapply() dado que la idea es que devuelva un vector en vez de una lista.
+
+```{r}
+
+# Revisar si la base de datos contiene NA (contiene 1)
+sum(is.na(data_clientes))
+
+# Verificar en que columna se encuentra el NA
+Na_columnas.dt_clientes <- sapply(dput(colnames(data_clientes)), function(var) sum(is.na(data_clientes[[var]])))
+
+Na_columnas.dt_clientes # Se encuentra en la variable GENERO
+```
+
+## Modificar categorías de las variables
+
+```{r}
+library(dplyr)
+data_clientes <- data_clientes %>%
+  mutate(GENERO = dplyr::recode(GENERO, "f"= "Femenino", "m"= "Masculino"),
+         ESTADO_CIVIL = dplyr::recode(ESTADO_CIVIL, "divsepwid" = "Viudo/Divorciado",
+                                      "married" = "Casado", "single" = "Soltero"),
+         MODALIDAD_PAGO = dplyr::recode(MODALIDAD_PAGO, "monthly"= "Mensual", 
+                                       "weekly" = "Semanal"),
+         HIPOTECA =dplyr::recode(HIPOTECA,"n"="NO", "y"="Si"),
+         RIESGO = dplyr::recode(RIESGO, "F"="Cumplimiento", "V"="Impago"))
+
+# Revisar como quedaron las variables recodificadas
+glimpse(data_clientes)
+```
+
+## Pruebas No paramétricas
+
+La pruebas parámétricas son esenciales cuando se quiere realizar análisis bivariados sin asumir una distribución específica de los datos queu generalemnte es la normalidad. Existen varias pruebas para realizar inferencias respecto a las relaciones, sin embargo hay ciertas condiciones que se deben tener en cuenta como lo muestra la siguiente tabla:
+
+
+| Tipo de Variables Comparadas           | Condición                   | Prueba Estadística                  |
+| -------------------------------------- | --------------------------- | ----------------------------------- |
+| **2 variables numéricas**              | Distribución normal         | **Correlación de Pearson**          |
+|                                        | No normal                   | **Correlación de Spearman**         |
+| **1 variable numérica + 1 categórica** | Distribución normal         | 2 categorías: **t de Student**      |
+|                                        |                             | >2 categorías: **ANOVA**            |
+|                                        | No normal                   | 2 categorías: **U de Mann-Whitney** |
+|                                        |                             | >2 categorías: **Kruskal-Wallis**   |
+| **2 variables categóricas**            | Tabla 2x2                   | **Test de Fisher**                  |
+|                                        | Tabla r x s (>2 categorías) | **Chi-cuadrado (χ²)**               |
+
+### Evaluar normalidad
+
+La prueba de Shapiro-Wilk se utiliza para evualar la normalidad de una variable, el comando es shapiro.test().
+
+(H₀): Los datos provienen de una distribución normal.
+
+(H₁): Los datos no provienen de una distribución normal.
+
+**Interpretación del p-valor**:
+
+Si **p > 0.05**: no se rechaza H₀ → los datos son compatibles con una distribución normal.
+
+Si **p ≤ 0.05**: se rechaza H₀ → los datos no siguen una distribución normal.
+
+```{r}
+Norm_tablas.Num <- lapply(variables.Num, function(var) shapiro.test(data_clientes[[var]]))
+names(Norm_tablas.Num) <- variables.Num
+Norm_tablas.Num # Ninguna variable sigue una distribución normal
+
+```
+### Correlación
+
+Es una medida estadística que indica la fuerza y dirección de una relación lineal entre dos variables cuantitativas.El resultado se encuentra en un rango entre [-1,1].
+**-1** : Correlación negativa perfecta (una variable sube y otra baja)
+**0**: No hay correlación
+**1**: Correlación positiva perfecta (ambas variables aumentan o disminuyen juntas)
+
+```{r}
+
+library(corrplot)
+cor(data_clientes$INGRESOS, data_clientes$EDAD, method = "spearman")
+
+# Correlación entre las variables numéricas ------------------------------------
+
+# Matriz de correlación
+Matriz_cor <- cor(data_clientes[variables.Num], #Dataframe con las variables numéricas de interés
+                  use = "complete.obs",  #Utiliza solo filas con datos completos, es como un na.rm =T
+                  method = "spearman")   #Método a utilizar: Spearman, Pearson, etc.
+
+# Gráfico de correlación
+corrplot(Matriz_cor,         #Matriz de correlación previamente calculada
+         method = "color",   #Agregar color para identificar la intensidad de la correlación
+         type = "upper",     #Visualizar solo el triangulo superior
+         addCoef.col = T)    #Añadir los valores de la autocorrelación en color negro
+
+```
+
+### U de Mann-Whitney
+
+Esta prueba evalúa si hay diferencia entre las medianas de los grupos.El comando difiere al nombre ya que es wilcox.test().
+
+(H₀): La mediana de los grupos son iguales.
+
+(H₁): La mediana de los grupos son diferentes.
+
+Si **p ≤ 0.05**: se rechaza H₀ → Hay diferencia en las medianas de los grupos.
+
+
+```{r}
+wilcox.test(INGRESOS~GENERO,  # Formula, como en un modelo logistico simple
+            data = data_clientes) #datos
+```
+
+### Otros
+
+Para T-Student y ANOVA se evalúa la diferencia entre las medias de los grupos. Parael test de Kruskall Wallis la diferencia entre las medianas de los grupos. Para el Test de fisher y Chi-cuadrado se evalúa la indepencia. Siempre se busca rechazar la Hiótesis nula, es decir, **p ≤ 0.05**.
+
+**T-Student**: t.test()
+**ANOVA**: aov(). Antes se evalúa la homogeneidad de varianzas con bartlett.test().
+**Kruskal Wallis**: kruskal.test()
+**Test de fisher**: fisher.test()
+**Chi-cuadrado**: chisq.test(). Tiene supuesto de valor esperado.
+
+## Visualización de datos
+
+### Gráfico de barras
+
+```{r}
+
+#| label: fig-barras
+#| fig-cap: "Gráfico de barras"
+
+ggplot(data_clientes, # Dataframe que incluye la variable
+       aes(x=ESTADO_CIVIL, # Variable que quiero graficar (Se grafica el conteo)
+           fill=ESTADO_CIVIL)) + #fill agrega color a cada categoría (colores predeterminados)
+  geom_bar() + #Función que establece el tipo de gráfico
+  geom_text(aes(label = ..count..), # Texto que se mostrará
+            stat = "count", # Cómo calcular el valor Conteo de observaciones
+            vjust=2, # Ubicación del valor
+            color= "white") + # Color del texto o label
+  scale_fill_manual(values = c("#1C86EE", "#458B00", "#EE1289")) + # Personalizar colores, fill debe estar arriba
+  scale_x_discrete(limits = c("Soltero", "Casado", "Viudo/Divorciado")) + # Personalizar el orden de la variable x
+  theme(legend.position = "right", axis.title.x = element_blank()) + #Agregar la leyenda al lado derecho y eliminar título eje y
+  labs(title = "Conteo de la variable Estado civil por categoría", x = " Estado civil", 
+       y = "Conteo (Frecuencia absoluta)") + # Agregar título y modificar nombres de los ejes
+  guides(fill = guide_legend(title="Estado Civil")) # Modificar título de la leyenda
+
+```
+
+### Boxplot
+
+```{r}
+#| label: fig-boxplot
+#| fig-cap: "Gráfico de Cajas y Bigotes"
+
+ggplot(data_clientes, aes(x = GENERO, y= INGRESOS)) +
+  stat_boxplot(geom = "errorbar",
+               width= 0.25) +
+  geom_boxplot(alpha=0.5, 
+               fill="#1C86EE",
+               colour= "black", 
+               outlier.colour = "#87CEFA") +
+  scale_x_discrete(limits= c("Femenino", "Masculino")) +
+  labs(title = "Gráfico de cajas: Ingresos por Género", x="Género", y="Ingresos")
+
+```
+
+### Dispersión
+
+```{r}
+
+#| label: fig-dispersion
+#| fig-cap: "Gráfico de Dispersión"
+
+ggplot(data_clientes, aes(x=EDAD, y=INGRESOS)) +
+  geom_point(alpha=0.2) + #Agregar transparencia para que se vea menos denso
+  labs(title="Edad vs Ingresos", x="Edad", y="Ingresos")
+
+
+data_clientes.Edad_Ingr <- data_clientes %>%
+  select(EDAD, INGRESOS) %>%
+  group_by(EDAD) %>%
+  summarize(media_Ingresos = mean(INGRESOS, na.rm=T))
+
+ggplot(data_clientes.Edad_Ingr, aes(x=EDAD, y=media_Ingresos)) +
+  geom_line(color="red") +
+  labs(title="Media de los Ingresos por Edad", x="Edad", y="Media de los Ingresos") 
+
+```
+
+### Mosaico
+```{r}
+
+#| label: fig-Mosaico
+#| fig-cap: "Gráfico de Mosaico"
+
+library(ggmosaic)
+ggplot(data_clientes) +
+  geom_mosaic(aes(x=product(RIESGO) , fill=ESTADO_CIVIL)) +
+  scale_fill_manual(values =c("#1C86EE", "#458B00", "#EE1289")) +
+  labs(title = "Gráfico Mosaico: Riesgo vs Estado Civil", y= "Estado Civil",
+       x="Riesgo") +
+  guides(fill=guide_legend(title= "Estado Civil"))
+
+```
+
+
+
+## Tablas gtsummary
+
+### Tablas univariadas
+
+```{r}
+library(gtsummary)
+
+data_clientes %>% # datos
+    dplyr::select(GENERO, ESTADO_CIVIL, MODALIDAD_PAGO, HIPOTECA, RIESGO) %>% # se seleccionan las variables que se van a tabular, incluyendo la variable a estratificar 
+    gtsummary::tbl_summary(
+            by = NULL, # nombre variable a estratificar
+            missing = "always", # incluye fila de conteo NA para todas las variables, no se incluye el porcentaje
+            missing_text = "(Missing)", # nombre que identifica el recuento de observaciones faltantes
+            statistic = list(all_continuous() ~ "{median} ({p25}, {p75})"), # especificar segun test de normalidad, en caso de no rechazar Ho~normalidad se especificaría: list(all_continuous() ~ "{mean} ({sd})")
+            digits = list(all_categorical() ~ c(0, 1), # (0) sin decimal la frecuencia absoluta, y (1) decimal la frecuencia relativa
+            all_continuous() ~ c(1, 1))) %>% # (0) sin decimal la mediana o media, y (1) decimal la desv estandar o IQR
+    gtsummary::add_n() %>% 
+    gtsummary::bold_labels()  # etiquetas o niveles en negrita
+```
+
+### Tablas bivariadas
+
+```{r}
+library(gtsummary)
+
+data_clientes %>% # datos
+    dplyr::select(GENERO, ESTADO_CIVIL, MODALIDAD_PAGO, HIPOTECA, RIESGO) %>% # se seleccionan las variables que se van a tabular, incluyendo la variable a estratificar 
+    gtsummary::tbl_summary(
+            by = RIESGO, # nombre variable a estratificar
+            missing = "always", # incluye fila de conteo NA para todas las variables, no se incluye el porcentaje
+            missing_text = "(Missing)", # nombre que identifica el recuento de observaciones faltantes
+            statistic = list(all_continuous() ~ "{median} ({p25}, {p75})"), # especificar segun test de normalidad, en caso de no rechazar Ho~normalidad se especificaría: list(all_continuous() ~ "{mean} ({sd})")
+            digits = list(all_categorical() ~ c(0, 1), # (0) sin decimal la frecuencia absoluta, y (1) decimal la frecuencia relativa
+            all_continuous() ~ c(1, 1))) %>% # (0) sin decimal la mediana o media, y (1) decimal la desv estandar o IQR
+    gtsummary::add_n() %>%
+    gtsummary::add_overall() %>% 
+    gtsummary::modify_spanning_header(all_stat_cols() ~ "**Chemotherapy Treatment**") %>% # agregar encabezado
+    gtsummary::bold_labels()  # etiquetas o niveles en negrita 
+```
+
+### Tablas bivariadas con valores p
+
+```{r}
+library(gtsummary)
+
+data_clientes %>% # datos
+    dplyr::select(GENERO, ESTADO_CIVIL, MODALIDAD_PAGO, HIPOTECA, RIESGO) %>% # se seleccionan las variables que se van a tabular, incluyendo la variable a estratificar 
+    gtsummary::tbl_summary(
+            by = RIESGO, # nombre variable a estratificar
+            missing = "always", # incluye fila de conteo NA para todas las variables, no se incluye el porcentaje
+            missing_text = "(Missing)", # nombre que identifica el recuento de observaciones faltantes
+            statistic = list(all_continuous() ~ "{median} ({p25}, {p75})"), # especificar segun test de normalidad, en caso de no rechazar Ho~normalidad se especificaría: list(all_continuous() ~ "{mean} ({sd})")
+            digits = list(all_categorical() ~ c(0, 1), # (0) sin decimal la frecuencia absoluta, y (1) decimal la frecuencia relativa
+            all_continuous() ~ c(1, 1))) %>% # (0) sin decimal la mediana o media, y (1) decimal la desv estandar o IQR
+    gtsummary::add_n() %>%
+    gtsummary::add_overall() %>% 
+    gtsummary::add_p(list(all_continuous() ~ "wilcox.test", # test no parametrico variables numericas
+                          all_categorical() ~ "chisq.test")) %>% # test variables categoricas
+    gtsummary::bold_p(t=0.05) %>% # valores p significativos en negrita
+    gtsummary::modify_spanning_header(all_stat_cols() ~ "**Chemotherapy Treatment**") %>% # agregar encabezado
+    gtsummary::modify_header(update = list(label ~ "**Variable**",
+                           p.value ~ "***valor p***")) %>% # modificar encabezado, tanto el nombre como el estilo (***cursiva***, **negrita**)
+    gtsummary::bold_labels() %>%  # etiquetas o niveles en negrita
+    gtsummary::modify_footnote( # notas al pie (queda a su opcion)
+      update = list(
+        all_stat_cols() ~ "Median (IQR);  n (%)",
+        p.value ~ "Wilcoxon rank sum test; Pearson's Chi-squared test")
+    ) 
+```
+
+
+# Modelos
+
+## Modelo Líneal simple
+
+```{r}
+#Modelo lineal simple
+model.Lsimple <- lm(INGRESOS~RIESGO, data=data_clientes)
+summary(model.Lsimple)
+```
+## Modelo Líneal múltiple
+```{r}
+
+library(car)
+library(lmtest)
+
+#Modelo lineal múltiple
+model.Lmultiple <- lm(INGRESOS~., data=subset(data_clientes, select = -ID))
+summary(model.Lmultiple)
+
+# Evaluación de supuestos
+
+# Normalidad de los residuos
+hist(resid(model.Lmultiple))
+shapiro.test(resid(model.Lmultiple))
+
+#Independencia de los residuos
+durbinWatsonTest(model.Lmultiple)
+
+#Homocedasticidad
+bptest(model.Lmultiple)
+
+# Supuesto de linealidad
+plot(model.Lmultiple, wich=1)
+
+#Ausencia de multicolinealidad
+vif(model.Lmultiple)
+
+
+```
+## Modelo Logístico
+
+```{r}
+
+options(scipen = 999)
+data_clientes$RIESGO_bin <- ifelse(data_clientes$RIESGO == "V", 1, 0)
+
+modelo.logit <- glm(RIESGO_bin ~. ,
+                    data = subset(data_clientes, select= -ID),
+                    family = binomial)
+
+summary(modelo.logit)
+exp(coefficients(modelo.logit))
+
+```
